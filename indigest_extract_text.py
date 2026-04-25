@@ -49,14 +49,14 @@ import sys
 from PyPDF2 import PdfReader
 from PyPDF2.errors import EmptyFileError
 
-__version__ = "2025-07-21T2204Z"
+__version__ = "2026-04-25T2235Z"
 
 def PDF_to_text(path_PDFs, path_text_files):
     '''
     Extract text from a PDF file at a specified path and write that text to a
     text file at a specified path.
     '''
-    # Skip if the file does not exist or is zero‐length.
+    # Skip if the file does not exist or is zero-length.
     if not os.path.isfile(path_PDFs):
         print(f"Warning: PDF not found, skipping: {path_PDFs}", file=sys.stderr)
         return
@@ -64,9 +64,10 @@ def PDF_to_text(path_PDFs, path_text_files):
         print(f"Warning: PDF is empty, skipping: {path_PDFs}", file=sys.stderr)
         return
 
-    # Try to open and parse the file.
+    # Try to open and parse the file. strict=False makes PyPDF2 more tolerant
+    # of malformed PDF objects.
     try:
-        reader = PdfReader(path_PDFs)
+        reader = PdfReader(path_PDFs, strict=False)
     except EmptyFileError:
         print(f"Warning: Cannot read empty file, skipping: {path_PDFs}", file=sys.stderr)
         return
@@ -74,15 +75,27 @@ def PDF_to_text(path_PDFs, path_text_files):
         print(f"Warning: Error reading PDF {path_PDFs}: {e}", file=sys.stderr)
         return
 
-    # Extract text and prepend the text with the filename.
+    # Extract text and prepend the text with the filename. Some malformed PDFs
+    # can fail only on specific pages, so handle page-level failures without
+    # stopping the whole run.
     with open(path_text_files, "w", encoding="utf-8", errors="replace") as out:
         out.write(f"--- {path_PDFs} ---\n\n")
-        for page in reader.pages:
-            text = page.extract_text()
+        for page_number, page in enumerate(reader.pages, start=1):
+            try:
+                text = page.extract_text()
+            except Exception as e:
+                print(
+                    f"Warning: could not extract text from page {page_number} "
+                    f"of {path_PDFs}: {e}",
+                    file=sys.stderr
+                )
+                continue
+
             if text:
                 out.write(text)
                 out.write("\n\n")
     print(f"Wrote: {path_text_files}")
+
 
 def concatenate_texts(output_file="text.txt", header_style="plain"):
     '''
