@@ -39,6 +39,8 @@ options:
     --version               display version and exit
     --directory=DIRECTORY   directory of PDFs to process [default: downloads]
     --textfile=FILENAME     output text filename [default: text.txt]
+    --skip-existing         skip PDFs whose corresponding .txt file already exists
+    --concatenate-only      concatenate existing .txt files without extracting from PDFs
 '''
 
 import docopt
@@ -49,14 +51,14 @@ import sys
 from PyPDF2 import PdfReader
 from PyPDF2.errors import EmptyFileError
 
-__version__ = "2026-04-25T2235Z"
+__version__ = "2026-05-24T0000Z"
 
 def PDF_to_text(path_PDFs, path_text_files):
     '''
     Extract text from a PDF file at a specified path and write that text to a
     text file at a specified path.
     '''
-    # Skip if the file does not exist or is zero-length.
+    # Skip if the file does not exist or is zero‐length.
     if not os.path.isfile(path_PDFs):
         print(f"Warning: PDF not found, skipping: {path_PDFs}", file=sys.stderr)
         return
@@ -64,10 +66,9 @@ def PDF_to_text(path_PDFs, path_text_files):
         print(f"Warning: PDF is empty, skipping: {path_PDFs}", file=sys.stderr)
         return
 
-    # Try to open and parse the file. strict=False makes PyPDF2 more tolerant
-    # of malformed PDF objects.
+    # Try to open and parse the file.
     try:
-        reader = PdfReader(path_PDFs, strict=False)
+        reader = PdfReader(path_PDFs)
     except EmptyFileError:
         print(f"Warning: Cannot read empty file, skipping: {path_PDFs}", file=sys.stderr)
         return
@@ -75,33 +76,21 @@ def PDF_to_text(path_PDFs, path_text_files):
         print(f"Warning: Error reading PDF {path_PDFs}: {e}", file=sys.stderr)
         return
 
-    # Extract text and prepend the text with the filename. Some malformed PDFs
-    # can fail only on specific pages, so handle page-level failures without
-    # stopping the whole run.
+    # Extract text and prepend the text with the filename.
     with open(path_text_files, "w", encoding="utf-8", errors="replace") as out:
         out.write(f"--- {path_PDFs} ---\n\n")
-        for page_number, page in enumerate(reader.pages, start=1):
-            try:
-                text = page.extract_text()
-            except Exception as e:
-                print(
-                    f"Warning: could not extract text from page {page_number} "
-                    f"of {path_PDFs}: {e}",
-                    file=sys.stderr
-                )
-                continue
-
+        for page in reader.pages:
+            text = page.extract_text()
             if text:
                 out.write(text)
                 out.write("\n\n")
     print(f"Wrote: {path_text_files}")
 
-
-def concatenate_texts(output_file="text.txt", header_style="plain"):
+def concatenate_texts(directory="downloads", output_file="text.txt", header_style="plain"):
     '''
     Concatenate text files.
     '''
-    pattern = os.path.join("downloads", "**", "*.txt")
+    pattern = os.path.join(directory, "**", "*.txt")
     txt_files = sorted(glob.glob(pattern, recursive=True))
     if not txt_files:
         print("No text files to concatenate.")
@@ -128,28 +117,34 @@ def main():
         sys.exit(0)
     directory = options["--directory"]
     text_filename = options["--textfile"]
+    skip_existing = options["--skip-existing"]
+    concatenate_only = options["--concatenate-only"]
 
     if not os.path.isdir(directory):
         print(f"Error: directory '{directory}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    found_any = False
-    for dirpath, _, filenames in os.walk(directory):
-        for fname in filenames:
-            if not fname.lower().endswith(".pdf"):
-                continue
-            found_any = True
-            pdf_path = os.path.join(dirpath, fname)
-            print(f"Processing file: {pdf_path}")
-            base, _ = os.path.splitext(fname)
-            txt_path = os.path.join(dirpath, f"{base}.txt")
-            PDF_to_text(pdf_path, txt_path)
+    if not concatenate_only:
+        found_any = False
+        for dirpath, _, filenames in os.walk(directory):
+            for fname in filenames:
+                if not fname.lower().endswith(".pdf"):
+                    continue
+                found_any = True
+                pdf_path = os.path.join(dirpath, fname)
+                base, _ = os.path.splitext(fname)
+                txt_path = os.path.join(dirpath, f"{base}.txt")
+                if skip_existing and os.path.exists(txt_path):
+                    print(f"Skipping existing text file: {txt_path}")
+                    continue
+                print(f"Processing file: {pdf_path}")
+                PDF_to_text(pdf_path, txt_path)
 
-    if not found_any:
-        print(f"No PDF files found under directory '{directory}'.")
-        return
+        if not found_any:
+            print(f"No PDF files found under directory '{directory}'.")
+            return
 
-    concatenate_texts(output_file=text_filename, header_style="plain")
+    concatenate_texts(directory=directory, output_file=text_filename, header_style="plain")
 
 if __name__ == "__main__":
     main()
